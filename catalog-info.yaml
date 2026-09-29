@@ -1,0 +1,10 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: visr-tests
+  title: visr-tests
+  description: Scheduled component tests and end-to-end experiment runs for ViSR
+spec:
+  type: service
+  lifecycle: experimental
+  owner: group:default/beamline-controls

@@ -1,0 +1,19 @@
+# Changes here will be overwritten by Copier
+_commit: 5.4.0
+_src_path: https://github.com/DiamondLightSource/python-copier-template.git
+author_email: thomas.kane@diamond.ac.uk
+author_name: Thomas Kane
+component_lifecycle: experimental
+component_owner: group:default/beamline-controls
+component_type: service
+description: Scheduled component tests and end-to-end experiment runs for ViSR
+distribution_name: visr-tests
+docker: true
+docs_type: README
+git_platform: github.com
+github_org: DiamondLightSource
+package_name: visr_tests
+pypi: false
+repo_name: visr-tests
+strict_typing: false
+type_checker: pyright

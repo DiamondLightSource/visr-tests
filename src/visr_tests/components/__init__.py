@@ -1,0 +1,1 @@
+"""Checks against individual components."""

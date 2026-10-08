@@ -13,7 +13,13 @@ classifiers = [
     "Programming Language :: Python :: 3.14",
 ]
 description = "Scheduled component tests and end-to-end experiment runs for ViSR"
-dependencies = [] # Add project dependencies here, e.g. ["click", "numpy"]
+dependencies = [
+    "aioca>=2.1",
+    "httpx>=0.28.1",
+    "p4p>=4.3.0",
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+]
 dynamic = ["version"]
 license.file = "LICENSE"
 readme = "README.md"
@@ -26,6 +32,7 @@ dev = [
     "pytest",
     "pytest-cov",
     "ruff",
+    "softioc>=4.7.2",
     "tox-uv",
     "types-mock",
 ]

@@ -23,7 +23,25 @@ ENV UV_PYTHON_INSTALL_DIR=/python
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --locked --no-editable --no-dev --managed-python
 
-# The runtime stage copies the built venv into a runtime container
+# The browser build adds the ui extra (Playwright) to the same venv
+FROM build AS build-browser
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-editable --no-dev --extra ui --managed-python
+
+# The -browser image: the runtime on Playwright's own image, which has Chromium
+# and its system libraries at /ms-playwright. Its version must be the
+# playwright pinned by the ui extra in pyproject.toml.
+FROM mcr.microsoft.com/playwright/python:v1.63.0-resolute AS browser
+
+COPY --from=build-browser /python /python
+COPY --from=build-browser /app/.venv /app/.venv
+ENV PATH=/app/.venv/bin:$PATH
+
+ENTRYPOINT ["visr-tests"]
+CMD ["--version"]
+
+# The runtime stage copies the built venv into a runtime container.
+# It stays the last stage, so a build with no --target makes this image.
 FROM ubuntu:resolute AS runtime
 
 # Add apt-get system dependecies for runtime here if needed

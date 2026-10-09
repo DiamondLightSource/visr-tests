@@ -25,6 +25,11 @@ license.file = "LICENSE"
 readme = "README.md"
 requires-python = ">=3.11"
 
+[project.optional-dependencies]
+# The UI checks (ui/*). Pinned to the Playwright of the -browser image's base,
+# mcr.microsoft.com/playwright/python (Dockerfile): bump the two together
+ui = ["playwright==1.63.0"]
+
 [dependency-groups]
 dev = [
     "pre-commit",

@@ -59,6 +59,7 @@ class FakeServices:
         self.outcome: Any = {"outcome": "success"}
         self.errors: list[Any] = []
         self.active_task: Any = {"task_id": TASK_ID}
+        self.worker_state: Any = "IDLE"
         self.abort_status = 202
         # tiled
         self.tiled_healthz_status = 200
@@ -126,6 +127,8 @@ class FakeServices:
             )
         if (method, path) == ("DELETE", f"/api/v1/tasks/{TASK_ID}"):
             return httpx.Response(200)
+        if (method, path) == ("GET", "/api/v1/worker/state"):
+            return httpx.Response(200, json=self.worker_state)
         if (method, path) == ("GET", "/api/v1/worker/task"):
             return httpx.Response(200, json=self.active_task)
         if (method, path) == ("PUT", "/api/v1/worker/state"):

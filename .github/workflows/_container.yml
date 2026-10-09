@@ -8,6 +8,17 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # The checks image, tagged <version> and latest
+          - target: runtime
+            suffix: ""
+          # The same with Playwright and Chromium for the UI checks, tagged
+          # <version>-browser and latest-browser
+          - target: browser
+            suffix: -browser
 
     steps:
       - name: Checkout
@@ -34,6 +45,7 @@ jobs:
           DOCKER_BUILD_RECORD_UPLOAD: false
         with:
           context: .
+          target: ${{ matrix.target }}
           # Need load and tags so we can test it below
           load: true
           tags: tag_for_testing
@@ -41,14 +53,25 @@ jobs:
       - name: Test cli works in cached runtime image
         run: docker run --rm tag_for_testing --version
 
+      - name: Test Chromium starts in cached browser image
+        if: matrix.target == 'browser'
+        run: >
+          docker run --rm --entrypoint python tag_for_testing -c
+          "from playwright.sync_api import sync_playwright as p;
+          b = p().start().chromium.launch(); print('chromium', b.version)"
+
       - name: Create tags for publishing image
         id: meta
         uses: docker/metadata-action@v6
         with:
           images: ghcr.io/${{ github.repository }}
+          # A release tag (0.2.0) also moves latest (latest-browser); a
+          # pre-release tag (0.2.0-beta.1, any tag with a '-') moves neither
+          flavor: |
+            latest=${{ !contains(github.ref_name, '-') }}
+            suffix=${{ matrix.suffix }},onlatest=true
           tags: |
             type=ref,event=tag
-            type=raw,value=latest
 
       - name: Push cached image to container registry
         if: inputs.publish && github.ref_type == 'tag'
@@ -59,6 +82,7 @@ jobs:
         # Docker cache and publish it
         with:
           context: .
+          target: ${{ matrix.target }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

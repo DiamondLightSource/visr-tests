@@ -2,12 +2,15 @@
 
 import json
 import os
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator, Iterator
+from contextlib import ExitStack
+from pathlib import Path
 from typing import NoReturn
 
 import httpx
 import pytest
 
+from .browser import Ui, open_ui, playwright_missing
 from .services import (
     Blueapi,
     CheckError,
@@ -131,3 +134,44 @@ def blueapi(
 @pytest.fixture(scope="session")
 def tiled(config: Config, http: httpx.Client) -> Tiled:
     return Tiled(http, config.tiled_url)
+
+
+REPORTS = pytest.StashKey[dict[str, pytest.TestReport]]()
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_runtest_makereport(
+    item: pytest.Item, call: pytest.CallInfo[None]
+) -> Generator[None, pytest.TestReport, pytest.TestReport]:
+    """Keep each phase's report on the test, so fixtures can see a failure."""
+    report = yield
+    item.stash.setdefault(REPORTS, {})[report.when] = report
+    return report
+
+
+@pytest.fixture
+def start_ui(
+    config: Config, request: pytest.FixtureRequest
+) -> Iterator[Callable[[], Ui]]:
+    """Starts headless Chromium on the ViSR UI (UI_URL), sending it the token.
+
+    The browser starts only when called, so a check can fail fast before it.
+    If the test fails, a screenshot of the page is saved beside its JUnit report.
+    """
+    missing = playwright_missing()
+    if missing:
+        _fail(ConfigError(missing))
+    token = request.getfixturevalue("token")
+    with ExitStack() as stack:
+        started: list[Ui] = []
+
+        def start() -> Ui:
+            if not started:
+                started.append(stack.enter_context(open_ui(config.ui_url, token)))
+            return started[0]
+
+        yield start
+        call = request.node.stash.get(REPORTS, {}).get("call")
+        xml = getattr(request.config.option, "xmlpath", None)
+        if started and call is not None and call.failed and xml:
+            started[0].screenshot(Path(xml).with_suffix(".png"))

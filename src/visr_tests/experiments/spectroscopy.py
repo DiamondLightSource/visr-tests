@@ -7,26 +7,37 @@ The scans move the sample stage; the fly scan also needs the PandA and the PMAC.
 
 import logging
 import time
+from enum import StrEnum
 from typing import Any
 
 import pytest
 
 from visr_tests.services import Blueapi, Config, Tiled
 
+
+class ScanType(StrEnum):
+    """The type of scan to perform."""
+
+    FLY = "fly"
+    STEP = "step"
+
+
 log = logging.getLogger(__name__)
 
-PLAN = "demo_spectroscopy"
+PLAN = "spectroscopy"
 POINTS = 4
 SIDE = 2  # bins along each side of the /binned image: sqrt(POINTS)
 # demo_spectroscopy flies when its stage velocity, grid_size /
 # (sqrt(points) * exposure_time), is at most 9.8 mm/s, and steps otherwise
 SCANS: dict[str, dict[str, Any]] = {
     "step": {
+        "scan_type": ScanType.STEP,
         "total_number_of_scan_points": POINTS,
         "grid_size": 2.0,
-        "exposure_time": 0.1,
+        "exposure_time": 0.2,
     },
     "fly": {
+        "scan_type": ScanType.FLY,
         "total_number_of_scan_points": POINTS,
         "grid_size": 2.0,
         "exposure_time": 0.2,

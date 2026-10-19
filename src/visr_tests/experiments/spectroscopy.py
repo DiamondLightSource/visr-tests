@@ -24,11 +24,10 @@ class ScanType(StrEnum):
 
 log = logging.getLogger(__name__)
 
-PLAN = "spectroscopy"
+PLAN = "demo_spectroscopy"
 POINTS = 4
 SIDE = 2  # bins along each side of the /binned image: sqrt(POINTS)
-# demo_spectroscopy flies when its stage velocity, grid_size /
-# (sqrt(points) * exposure_time), is at most 9.8 mm/s, and steps otherwise
+
 SCANS: dict[str, dict[str, Any]] = {
     "step": {
         "scan_type": ScanType.STEP,

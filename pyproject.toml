@@ -47,6 +47,10 @@ GitHub = "https://github.com/DiamondLightSource/visr-tests"
 email = "thomas.kane@diamond.ac.uk"
 name = "Thomas Kane"
 
+[tool.uv]
+# Minimum uv to fix eMudhra CA cert incident (see discuss.python.org/t/109576)
+required-version = ">=0.13.5"
+
 [tool.setuptools_scm]
 version_file = "src/visr_tests/_version.py"
 

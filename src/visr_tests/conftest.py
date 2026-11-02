@@ -161,8 +161,8 @@ def start_ui(
     missing = playwright_missing()
     if missing:
         _fail(ConfigError(missing))
-    token = request.getfixturevalue("token")
-    with ExitStack() as stack:
+    token = request.getfixturevalue("token")  # pragma: no cover
+    with ExitStack() as stack:  # pragma: no cover
         started: list[Ui] = []
 
         def start() -> Ui:

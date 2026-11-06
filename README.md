@@ -38,6 +38,7 @@ Check                      | What it checks
 `components/iocs`          | each IOC in `IOC_NAMES` answers `caget <IOC NAME>:UPTIME` (devIocStats)
 `experiments/spectroscopy` | runs `demo_spectroscopy` as a step scan and as a fly scan through blueapi, then finds each run in tiled by `start.blueapi_task_id` and checks its exit status is `success`, it has 4 primary events, and `/binned?width=2&height=2` gives a 2x2 `RedTotal`
 `experiments/tomography`   | the tomography experiment
+`ui/spectroscopy`          | in headless Chromium, as the service account: opens the ViSR UI's Spectroscopy page, presses Run with the form's default parameters, waits for "Plan succeeded", then checks through blueapi's task API that the task completed successfully. Needs the `-browser` image
 
 The PV checks only read: they never write a PV or move anything. A PV must
 answer within `PV_TIMEOUT` seconds; one that does not is tried once more before
@@ -48,6 +49,54 @@ The scans move the sample stage; the fly scan also needs the PandA and PMAC.
 The plan, its parameters and the expected results are in
 `src/visr_tests/experiments/spectroscopy.py`.
 
+### The UI check
+
+`ui/spectroscopy` drives the ViSR web UI (`b01-1-sci-ui`, the
+[atlas](https://github.com/DiamondLightSource/atlas) `apps/visr` SPA) the way
+a user does. Its selectors follow the deployed tag, `visr@0.5.4-auth-test-10`,
+and will need updating when the deployment moves to a later UI.
+
+- It first asks blueapi for the worker state. If the worker is not `IDLE`,
+  another scan is running: the check fails and submits nothing. It never
+  queues behind another scan.
+- It opens `$UI_URL/acquisition/spectroscopy` with the instrument session set
+  to `INSTRUMENT_SESSION`, checks the UI shows the service account logged in,
+  and presses Run with the form's defaults (`demo_spectroscopy`, 25 points,
+  5 mm grid, 0.1 s exposure). The scan is real and moves the sample stage.
+- It waits up to `SCAN_TIMEOUT` seconds, from the start of the check, for the
+  UI to report "Plan succeeded", then confirms with blueapi that the task
+  completed with a success outcome. If the check fails once the UI may have
+  started the scan (the timeout, a slow answer to the submission, an error
+  the UI shows), the page is stopped from starting any task, and each task it
+  did start is aborted if it is still the worker's active task. A task the
+  page did not start is never aborted.
+- When the scan finishes the UI submits the `visr-reconstruction` workflow
+  for the instrument session, as it does for every scan.
+
+The browser holds no login session: it sends the service account's
+`client_credentials` token as `Authorization: Bearer` on requests to the
+UI's own origin (`UI_URL`) only, never to any other origin, such as the PV
+camera stream or the identity provider, not even through a redirect. A
+redirect within the UI's origin is followed with the token. The page's event
+streams from the UI are opened by a stand-in for the browser's `EventSource`
+that never follows a redirect. For the token to work, the UI's oauth2-proxy (in
+`b01-1-services`, `services/b01-1-sci-ui`) must accept bearer tokens from the
+identity provider, with the service account's audience:
+
+```
+skip_jwt_bearer_tokens = true
+extra_jwt_issuers = ["https://identity.diamond.ac.uk/realms/dls=account"]
+```
+
+Without them the UI shows logged out and the check fails saying so. If the
+check fails, a screenshot of the page is saved beside its JUnit report, as
+`<check>.png`. Neither the token nor request headers are logged or saved.
+
+The bearer is only added to requests for the UI's own origin. This guards
+against ordinary redirects, not against hostile script in the UI page or a
+redirect `Location` crafted to parse differently in Python and Chromium;
+the check only ever loads our own UI, so those are accepted.
+
 ### Environment
 
 Variable             | Default | Used by
@@ -55,11 +104,12 @@ Variable             | Default | Used by
 `BLUEAPI_URL`        | `https://b01-1-blueapi.diamond.ac.uk` | blueapi checks. The public URL, so requests go through oauth2-proxy as users' do
 `TILED_URL`          | `http://b01-1-tiled:8000` | tiled checks. The in-cluster Service
 `TOKEN_URL`          | `https://identity.diamond.ac.uk/realms/dls/protocol/openid-connect/token` | experiments
-`CLIENT_ID`          | none | experiments: the Keycloak service account's client id
-`CLIENT_SECRET`      | none | experiments: its client secret
-`INSTRUMENT_SESSION` | none | experiments: the instrument session the plans run in, e.g. `cm44191-4`. The service account must be allowed to run plans in it
-`SCAN_TIMEOUT`       | `300` | experiments: seconds each scan may take, from submitting it to its run stopping in tiled
+`CLIENT_ID`          | none | experiments and UI checks: the Keycloak service account's client id
+`CLIENT_SECRET`      | none | experiments and UI checks: its client secret
+`INSTRUMENT_SESSION` | none | experiments and UI checks: the instrument session the plans run in, e.g. `cm44191-4`. The service account must be allowed to run plans in it
+`SCAN_TIMEOUT`       | `300` | experiments: seconds each scan may take, from submitting it to its run stopping in tiled. `ui/spectroscopy`: seconds from the start of the check to the UI reporting the outcome
 `PV_TIMEOUT`         | `5` | PV checks: seconds to wait for each PV read, as `caget -w 5`
+`UI_URL`             | `https://visr.diamond.ac.uk` | `ui/spectroscopy`: the ViSR UI, through its oauth2-proxy
 `IOC_NAMES`          | none | `components/iocs`: the IOCs to check, separated by commas or spaces, e.g. `bl01c-di-dcam-01,bl01c-mo-ioc-01`. Each must load devIocStats (`devIocStats.iocAdminSoft` in its `ioc.yaml`)
 `EPICS_CA_NAME_SERVERS` | none | PV checks over CA: in the cluster the gateway, `b01-1-epics-gateways:9064`
 `EPICS_PVA_NAME_SERVERS` | none | PV checks over PVA: in the cluster the gateway, `b01-1-epics-gateways:9075`
@@ -95,6 +145,43 @@ IOC_NAMES=bl01c-di-dcam-01,bl01c-di-dcam-02,bl01c-di-dcam-04,bl01c-di-dcam-05,bl
         components/align BL01C-EA-ALIGN-01 \
         components/panda BL01C-EA-PANDA-01 BL01C-MO-PPANDA-01 \
         components/iocs
+```
+
+## The -browser image
+
+The UI checks need Playwright and Chromium, which the default image leaves
+out. CI builds a second image from the same source, the Dockerfile's
+`browser` target, on Playwright's own image
+(`mcr.microsoft.com/playwright/python`), tagged `<version>-browser` and
+`latest-browser`:
+
+```
+docker run ghcr.io/diamondlightsource/visr-tests:<version>-browser run ui/spectroscopy
+```
+
+It runs every check the default image does. Playwright comes from the `ui`
+extra, pinned to the version of the base image: bump them together. To run
+the UI check outside the image, install the extra and Chromium:
+
+```
+uv sync --extra ui
+uv run playwright install --with-deps chromium
+CLIENT_ID=... CLIENT_SECRET=... INSTRUMENT_SESSION=cm44191-4 \
+    uv run visr-tests run ui/spectroscopy
+```
+
+In the cluster it runs as its own CronJob, `b01-1-nightly-ui`, at 03:00, on
+the `-browser` image with the same `visr-tests-secret` and
+`INSTRUMENT_SESSION` as the experiments job.
+
+The tests in `tests/test_ui.py` run the check in a real browser against a
+build of the UI and fake backends (`tests/fake_ui.py`). They are skipped
+unless the `ui` extra is installed and `VISR_UI_DIST` names a built
+`apps/visr/dist` from atlas at the deployed tag, so CI skips them: run them
+locally before a release:
+
+```
+VISR_UI_DIST=<atlas>/apps/visr/dist uv run --extra ui pytest tests/test_ui.py
 ```
 
 ## Provisioning the client secret

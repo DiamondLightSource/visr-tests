@@ -20,6 +20,7 @@ log = logging.getLogger(__name__)
 
 BLUEAPI_URL = "https://b01-1-blueapi.diamond.ac.uk"
 TILED_URL = "http://b01-1-tiled:8000"
+UI_URL = "https://visr.diamond.ac.uk"
 TOKEN_URL = "https://identity.diamond.ac.uk/realms/dls/protocol/openid-connect/token"
 SCAN_TIMEOUT = 300.0
 PV_TIMEOUT = 5.0
@@ -46,6 +47,7 @@ class Config:
     instrument_session: str = ""
     scan_timeout: float = SCAN_TIMEOUT
     pv_timeout: float = PV_TIMEOUT
+    ui_url: str = UI_URL
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> Config:
@@ -69,6 +71,7 @@ class Config:
         return cls(
             blueapi_url=get("BLUEAPI_URL", BLUEAPI_URL).rstrip("/"),
             tiled_url=get("TILED_URL", TILED_URL).rstrip("/"),
+            ui_url=get("UI_URL", UI_URL).rstrip("/"),
             token_url=get("TOKEN_URL", TOKEN_URL),
             client_id=get("CLIENT_ID"),
             client_secret=get("CLIENT_SECRET"),
@@ -171,6 +174,23 @@ def fetch_token(client: httpx.Client, config: Config) -> str:
         raise CheckError("token endpoint returned an empty access_token")
     log.info("obtained a client_credentials token for %s", config.client_id)
     return token
+
+
+def check_succeeded(task_id: str, plan: str, task: Mapping[str, Any]) -> None:
+    """Raise unless the complete ``task`` succeeded with no errors."""
+    outcome = task.get("outcome")
+    errors = task.get("errors") or []
+    if not isinstance(outcome, dict) or outcome.get("outcome") != "success":
+        if isinstance(outcome, dict) and outcome.get("outcome") == "error":
+            why = f"{outcome.get('type')}: {outcome.get('message')}"
+        else:
+            why = f"no success outcome ({outcome!r})"
+        raise CheckError(f"task {task_id} ({plan}) failed: {_shorten(why)}")
+    if errors:
+        raise CheckError(
+            f"task {task_id} ({plan}) reported {len(errors)} error(s): "
+            f"{_shorten(str(errors[0]))}"
+        )
 
 
 class Blueapi:
@@ -278,33 +298,17 @@ class Blueapi:
         log.info("started task %s", task_id)
 
         while True:
-            task = self.get_json(f"/api/v1/tasks/{task_id}")
-            if not isinstance(task, dict):
-                raise CheckError(
-                    f"GET /api/v1/tasks/{task_id} returned unexpected JSON"
-                )
+            task = self.task(task_id)
             if task.get("is_complete") is True:
                 break
             if self.clock() >= deadline:
                 raise CheckError(
                     f"task {task_id} ({plan}) did not complete in time"
-                    f"{self._abort(task_id)}"
+                    f"{self.abort(task_id)}"
                 )
             self.sleep(self.poll_interval)
 
-        outcome = task.get("outcome")
-        errors = task.get("errors") or []
-        if not isinstance(outcome, dict) or outcome.get("outcome") != "success":
-            if isinstance(outcome, dict) and outcome.get("outcome") == "error":
-                why = f"{outcome.get('type')}: {outcome.get('message')}"
-            else:
-                why = f"no success outcome ({outcome!r})"
-            raise CheckError(f"task {task_id} ({plan}) failed: {_shorten(why)}")
-        if errors:
-            raise CheckError(
-                f"task {task_id} ({plan}) reported {len(errors)} error(s): "
-                f"{_shorten(str(errors[0]))}"
-            )
+        check_succeeded(task_id, plan, task)
         log.info("task %s completed successfully", task_id)
         return task_id
 
@@ -315,8 +319,24 @@ class Blueapi:
         except CheckError as error:
             log.warning("could not delete unstarted task %s: %s", task_id, error)
 
-    def _abort(self, task_id: str) -> str:
-        """Abort the worker's active task, only if it is ``task_id``."""
+    def worker_state(self) -> str:
+        """The worker's state, e.g. ``IDLE`` or ``RUNNING``."""
+        state = self.get_json("/api/v1/worker/state")
+        if not isinstance(state, str):
+            raise CheckError("GET /api/v1/worker/state returned unexpected JSON")
+        return state
+
+    def task(self, task_id: str) -> dict[str, Any]:
+        task = self.get_json(f"/api/v1/tasks/{task_id}")
+        if not isinstance(task, dict):
+            raise CheckError(f"GET /api/v1/tasks/{task_id} returned unexpected JSON")
+        return task
+
+    def abort(self, task_id: str) -> str:
+        """Abort the worker's active task, only if it is ``task_id``.
+
+        Returns what happened, as a clause to append to an error message.
+        """
         try:
             active = self.get_json("/api/v1/worker/task")
             if not isinstance(active, dict) or active.get("task_id") != task_id:

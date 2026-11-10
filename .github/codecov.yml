@@ -1,0 +1,5 @@
+# Leave out the modules that only run in a real browser. CI has no Chromium, so
+# their tests skip there and codecov would count their lines as missing.
+ignore:
+  - "src/visr_tests/browser.py"
+  - "src/visr_tests/ui/spectroscopy.py"
